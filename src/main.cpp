@@ -193,7 +193,7 @@ void processInput(GLFWwindow *window)
     float angleRad = gravityAngle * (3.14159f / 180.0f);
     float gravityX = gravityStrength * std::cos(angleRad);
     float gravityY = gravityStrength * std::sin(angleRad);
-    sim.setGravity(glm::vec2(gravityX, gravityY));
+    sim.setGravity(FluidSim::Vector2(gravityX, gravityY));
 }
 
 int main() {

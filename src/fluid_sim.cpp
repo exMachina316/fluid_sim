@@ -1,30 +1,43 @@
 #include "fluid_sim.h"
-#include <cstdlib>
-#include <unordered_map>
+#include <stdlib.h>
+
+struct CellData {
+    int cellIndex;
+    std::vector<size_t> particleIndices;
+    CellData* next;
+};
+
+// Define a small fixed-size hash table (power of 2 for optimization)
+const int HASH_TABLE_SIZE = 64;
+CellData* hashTable[HASH_TABLE_SIZE] = {nullptr};
+CellData cellDataPool[256]; // Pre-allocated pool for cell data
+int cellDataPoolIndex = 0;
 
 const std::vector<FluidSim::Particle>& FluidSim::getParticles() const {
     return particles;
 }
 
-void FluidSim::setGravity(const glm::vec2& gravityVector) {
+void FluidSim::setGravity(const Vector2& gravityVector) {
     gravity = gravityVector;
 }
 
 FluidSim::FluidSim(int numParticles) {
     particles.resize(numParticles);
     for (auto& p : particles) {
-        p.position = glm::vec2(static_cast<float>(rand() % 100) / 100.0f,
-                               static_cast<float>(rand() % 100) / 100.0f);
-        p.velocity = glm::vec2(static_cast<float>(rand() % 100) / 100.0f,
-                               static_cast<float>(rand() % 100) / 100.0f);
+        p.position = Vector2(static_cast<float>(rand() % 100) / 100.0f,
+                            static_cast<float>(rand() % 100) / 100.0f);
+        p.velocity = Vector2(static_cast<float>(rand() % 100) / 100.0f,
+                            static_cast<float>(rand() % 100) / 100.0f);
     }
 }
 
 void FluidSim::step(float dt) {
     // Apply gravity and update positions
     for (auto& p : particles) {
-        p.velocity += gravity * dt;
-        p.position += p.velocity * dt;
+        p.velocity.x += gravity.x * dt;
+        p.velocity.y += gravity.y * dt;
+        p.position.x += p.velocity.x * dt;
+        p.position.y += p.velocity.y * dt;
     }
 
     // Handle particle-particle collisions
@@ -51,68 +64,120 @@ void FluidSim::step(float dt) {
     }
 }
 
+// Hash function for cell indices
+int hashCell(int cellIndex) {
+    return cellIndex & (HASH_TABLE_SIZE - 1); // Fast modulo for power of 2
+}
+
+// Reset the hash table between simulation steps
+void clearHashTable() {
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        hashTable[i] = nullptr;
+    }
+    cellDataPoolIndex = 0;
+}
+
+// Add a particle to the spatial hash
+void addToSpatialHash(int cellIndex, size_t particleIndex) {
+    int bucket = hashCell(cellIndex);
+    
+    // Check if cell already exists
+    CellData* current = hashTable[bucket];
+    while (current != nullptr) {
+        if (current->cellIndex == cellIndex) {
+            current->particleIndices.push_back(particleIndex);
+            return;
+        }
+        current = current->next;
+    }
+    
+    // Create new cell data if we have space
+    if (cellDataPoolIndex < 256) {
+        CellData* newCell = &cellDataPool[cellDataPoolIndex++];
+        newCell->cellIndex = cellIndex;
+        newCell->particleIndices.clear();
+        newCell->particleIndices.push_back(particleIndex);
+        newCell->next = hashTable[bucket];
+        hashTable[bucket] = newCell;
+    }
+}
+
+// Find a cell in the hash table
+CellData* findCell(int cellIndex) {
+    int bucket = hashCell(cellIndex);
+    CellData* current = hashTable[bucket];
+    
+    while (current != nullptr) {
+        if (current->cellIndex == cellIndex) {
+            return current;
+        }
+        current = current->next;
+    }
+    
+    return nullptr;
+}
+
 void FluidSim::handleCollisions(float dt) {
     const float cellSize = 2.1f * particleRadius; // Slightly larger than particle diameter
 
-    // Create spatial hash grid (mapping from cell index to particles in that cell)
-    std::unordered_map<int, std::vector<size_t>> grid;
-
-    // Hash function to convert 2D position to 1D cell index
-    auto hashFunction = [cellSize](const glm::vec2& pos) -> int {
-        int x = static_cast<int>(pos.x / cellSize);
-        int y = static_cast<int>(pos.y / cellSize);
-        // Cantor pairing function for combining two integers into one
-        return ((x + y) * (x + y + 1) / 2) + y;
-    };
+    // Clear the hash table
+    clearHashTable();
 
     // Insert particles into the grid
     for (size_t i = 0; i < particles.size(); i++) {
-        int cellIndex = hashFunction(particles[i].position);
-        grid[cellIndex].push_back(i);
+        int x = static_cast<int>(particles[i].position.x / cellSize);
+        int y = static_cast<int>(particles[i].position.y / cellSize);
+        // Cantor pairing function for combining two integers into one
+        int cellIndex = ((x + y) * (x + y + 1) / 2) + y;
+        addToSpatialHash(cellIndex, i);
     }
 
-    // Check for collisions only between particles in the same or neighboring cells
-    for (const auto& cell : grid) {
-        // Get the current cell's particles
-        const auto& cellParticles = cell.second;
+    // Check for collisions
+    for (int h = 0; h < HASH_TABLE_SIZE; h++) {
+        CellData* cell = hashTable[h];
+        
+        while (cell != nullptr) {
+            const auto& cellParticles = cell->particleIndices;
+            
+            // Check collisions within this cell
+            for (size_t i = 0; i < cellParticles.size(); i++) {
+                size_t p1Index = cellParticles[i];
 
-        // Check collisions within this cell
-        for (size_t i = 0; i < cellParticles.size(); i++) {
-            size_t p1Index = cellParticles[i];
+                // Check against other particles in the same cell
+                for (size_t j = i + 1; j < cellParticles.size(); j++) {
+                    size_t p2Index = cellParticles[j];
+                    resolveCollision(p1Index, p2Index);
+                }
 
-            // Check against other particles in the same cell
-            for (size_t j = i + 1; j < cellParticles.size(); j++) {
-                size_t p2Index = cellParticles[j];
-                resolveCollision(p1Index, p2Index);
-            }
+                // Generate neighboring cell indices
+                Vector2 pos = particles[p1Index].position;
+                int x = static_cast<int>(pos.x / cellSize);
+                int y = static_cast<int>(pos.y / cellSize);
 
-            // Generate neighboring cell indices
-            glm::vec2 pos = particles[p1Index].position;
-            int x = static_cast<int>(pos.x / cellSize);
-            int y = static_cast<int>(pos.y / cellSize);
+                // Check neighboring cells (more efficient loop unrolling)
+                for (int nx = x - 1; nx <= x + 1; nx++) {
+                    for (int ny = y - 1; ny <= y + 1; ny++) {
+                        // Skip the current cell (already checked)
+                        if (nx == x && ny == y) continue;
 
-            // Check all 8 neighboring cells
-            for (int nx = x - 1; nx <= x + 1; nx++) {
-                for (int ny = y - 1; ny <= y + 1; ny++) {
-                    // Skip the current cell (already checked)
-                    if (nx == x && ny == y) continue;
-
-                    // Calculate neighbor cell index
-                    int neighborCellIndex = ((nx + ny) * (nx + ny + 1) / 2) + ny;
-
-                    // Check if the neighboring cell exists in our grid
-                    auto neighborIt = grid.find(neighborCellIndex);
-                    if (neighborIt != grid.end()) {
-                        // Check against all particles in the neighboring cell
-                        for (size_t p2Index : neighborIt->second) {
-                            // Avoid duplicate checks (only check if p1 < p2)
-                            if (p1Index < p2Index) {
-                                resolveCollision(p1Index, p2Index);
+                        // Calculate neighbor cell index
+                        int neighborCellIndex = ((nx + ny) * (nx + ny + 1) / 2) + ny;
+                        
+                        // Find the neighbor cell
+                        CellData* neighborCell = findCell(neighborCellIndex);
+                        if (neighborCell != nullptr) {
+                            // Check against particles in the neighboring cell
+                            for (size_t p2Index : neighborCell->particleIndices) {
+                                if (p1Index < p2Index) {
+                                    resolveCollision(p1Index, p2Index);
+                                }
                             }
                         }
                     }
                 }
             }
+            
+            cell = cell->next;
         }
     }
 }
@@ -122,32 +187,36 @@ void FluidSim::resolveCollision(size_t i, size_t j) {
     auto& p2 = particles[j];
 
     // Vector from p1 to p2
-    glm::vec2 diff = p2.position - p1.position;
-    float distance = glm::length(diff);
+    Vector2 diff = Vector2(p2.position.x - p1.position.x, p2.position.y - p1.position.y);
+    float distance = length(diff);
 
     // Check if particles are colliding
     float minDistance = 2.0f * particleRadius;
     if (distance < minDistance) {
         // Normalize the difference vector
-        glm::vec2 collisionNormal = diff;
+        Vector2 collisionNormal = diff;
         if (distance > 0.0001f) {  // Avoid division by zero
-            collisionNormal /= distance;
+            collisionNormal.x /= distance;
+            collisionNormal.y /= distance;
         } else {
             // If particles are at the same position, use a random direction
             float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159f;
-            collisionNormal = glm::vec2(cos(angle), sin(angle));
+            collisionNormal.x = cosf(angle);
+            collisionNormal.y = sinf(angle);
         }
 
         // Move particles apart to prevent overlap
         float overlap = minDistance - distance;
-        p1.position -= 0.5f * overlap * collisionNormal;
-        p2.position += 0.5f * overlap * collisionNormal;
+        p1.position.x -= 0.5f * overlap * collisionNormal.x;
+        p1.position.y -= 0.5f * overlap * collisionNormal.y;
+        p2.position.x += 0.5f * overlap * collisionNormal.x;
+        p2.position.y += 0.5f * overlap * collisionNormal.y;
 
         // Calculate relative velocity
-        glm::vec2 relativeVelocity = p2.velocity - p1.velocity;
+        Vector2 relativeVelocity = Vector2(p2.velocity.x - p1.velocity.x, p2.velocity.y - p1.velocity.y);
 
         // Calculate impulse
-        float velocityAlongNormal = glm::dot(relativeVelocity, collisionNormal);
+        float velocityAlongNormal = dot(relativeVelocity, collisionNormal);
 
         // Only resolve if objects are moving toward each other
         if (velocityAlongNormal < 0.0f) {
@@ -156,9 +225,11 @@ void FluidSim::resolveCollision(size_t i, size_t j) {
             j /= 2.0f;  // Assuming equal mass for all particles
 
             // Apply impulse
-            glm::vec2 impulse = j * collisionNormal;
-            p1.velocity -= impulse;
-            p2.velocity += impulse;
+            Vector2 impulse = Vector2(j * collisionNormal.x, j * collisionNormal.y);
+            p1.velocity.x -= impulse.x;
+            p1.velocity.y -= impulse.y;
+            p2.velocity.x += impulse.x;
+            p2.velocity.y += impulse.y;
         }
     }
 }
