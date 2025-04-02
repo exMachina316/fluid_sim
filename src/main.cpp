@@ -4,7 +4,7 @@
 #include <vector>
 #include <iostream>
 
-FluidSim sim(1000);
+FluidSim sim(64);
 
 // Gravity control
 float gravityAngle = 270.0f; // Down by default (in degrees)
@@ -12,8 +12,12 @@ float gravityStrength = 9.8f; // Default gravity strength
 const float ANGLE_INCREMENT = 5.0f; // Rotation speed in degrees
 
 // settings
-const unsigned int SCR_WIDTH = 800;
+const unsigned int SCR_WIDTH = 600;
 const unsigned int SCR_HEIGHT = 600;
+
+// LED Matrix display configuration
+const int MATRIX_SIZE = 8;
+bool ledMatrix[MATRIX_SIZE][MATRIX_SIZE] = {false};
 
 // Shader sources
 unsigned int shaderProgram;
@@ -25,7 +29,7 @@ const char* vertexShaderSource = R"(
     layout (location = 0) in vec2 aPos;
     void main() {
         gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);
-        gl_PointSize = 5.0;
+        gl_PointSize = 50.0;
     }
 )";
 
@@ -87,34 +91,92 @@ void setupShaders() {
     glGenBuffers(1, &VBO);
 }
 
-void renderParticles() {
+void renderLEDMatrixOnScreen() {
+    // Use different colors for the LED display
+    glUseProgram(shaderProgram);
+    int colorLocation = glGetUniformLocation(shaderProgram, "color");
+    
+    // Calculate LED size and spacing
+    float cellSize = 1.6f / MATRIX_SIZE;
+    float padding = cellSize * 0.1f;
+    float actualSize = cellSize - padding * 2;
+    
+    // Draw each LED as a point
+    glPointSize(actualSize *  500.0f); // Adjust the size to be visible
+    
+    std::vector<float> ledPositions;
+    
+    for (int y = 0; y < MATRIX_SIZE; y++) {
+        for (int x = 0; x < MATRIX_SIZE; x++) {
+            // Calculate position in normalized device coordinates
+            float xPos = -0.8f + x * cellSize + cellSize/2;
+            float yPos = -0.8f + y * cellSize + cellSize/2;
+            
+            // Set color based on LED state
+            if (ledMatrix[y][x]) {
+                glUniform4f(colorLocation, 0.0f, 1.0f, 0.0f, 1.0f); // Green for ON
+            } else {
+                glUniform4f(colorLocation, 0.1f, 0.1f, 0.1f, 1.0f); // Dark gray for OFF
+            }
+            
+            // Draw the LED
+            unsigned int ledVAO, ledVBO;
+            glGenVertexArrays(1, &ledVAO);
+            glGenBuffers(1, &ledVBO);
+            
+            float vertices[] = {xPos, yPos};
+            
+            glBindVertexArray(ledVAO);
+            glBindBuffer(GL_ARRAY_BUFFER, ledVBO);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+            
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+            glEnableVertexAttribArray(0);
+            
+            glDrawArrays(GL_POINTS, 0, 1);
+            
+            // Cleanup
+            glDeleteVertexArrays(1, &ledVAO);
+            glDeleteBuffers(1, &ledVBO);
+        }
+    }
+    
+    // Reset color
+    glUniform4f(colorLocation, 0.0f, 0.5f, 1.0f, 1.0f);
+}
+
+void renderToLEDMatrix() {
+    // Clear the LED matrix
+    for (int y = 0; y < MATRIX_SIZE; y++) {
+        for (int x = 0; x < MATRIX_SIZE; x++) {
+            ledMatrix[y][x] = false;
+        }
+    }
+    
     // Get particles from simulation
     const auto& particles = sim.getParticles();
-
-    // Create a vector of positions from particle data
-    std::vector<float> positions;
-    positions.reserve(particles.size() * 2); // x, y for each particle
-
+    
+    // Map particles to LED matrix cells
     for (const auto& p : particles) {
-        positions.push_back(p.position.x*2.0 - 1);
-        positions.push_back(p.position.y*2.0 - 1);
+        // Convert normalized coordinates to matrix indices
+        int x = static_cast<int>(p.position.x * MATRIX_SIZE);
+        int y = static_cast<int>(p.position.y * MATRIX_SIZE);
+        
+        // Ensure within bounds
+        if (x >= 0 && x < MATRIX_SIZE && y >= 0 && y < MATRIX_SIZE) {
+            ledMatrix[y][x] = true;
+        }
     }
-
-    // Bind buffers and update data
-    glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, positions.size() * sizeof(float), positions.data(), GL_DYNAMIC_DRAW);
-
-    // Set vertex attributes
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    // Render particles
-    glUseProgram(shaderProgram);
-    glDrawArrays(GL_POINTS, 0, particles.size());
-
-    // Unbind
-    // glBindVertexArray(0);
+    
+    // Display LED matrix in console (debugging)
+    std::cout << "LED Matrix Display:" << std::endl;
+    for (int y = MATRIX_SIZE-1; y >= 0; y--) {
+        for (int x = 0; x < MATRIX_SIZE; x++) {
+            std::cout << (ledMatrix[y][x] ? "■ " : "□ ");
+        }
+        std::cout << std::endl;
+    }
+    std::cout << std::endl;
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
@@ -234,8 +296,6 @@ int main() {
     setupShaders();
     glEnable(GL_PROGRAM_POINT_SIZE);
 
-    // Run for 20s
-
     while (!glfwWindowShouldClose(window)) {
         // Input
         processInput(window);
@@ -244,7 +304,13 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT);
 
         sim.step(0.01f);
-        renderParticles();
+        
+        // Update LED matrix state
+        renderToLEDMatrix();
+        
+        // LED matrix visualization mode
+        renderLEDMatrixOnScreen();
+        
         renderGravityVector();
 
         // check and call events and swap the buffers
