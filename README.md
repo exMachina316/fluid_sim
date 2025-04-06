@@ -17,22 +17,30 @@ ___
 The project should look like this by now:
 
     fluid_sim
-    ├── bin
-    ├── build
+    ├── build.sh
     ├── CMakeLists.txt
-    ├── image.png
+    ├── docs
+    │   └── image.png
     ├── include
     │   ├── fluid_sim.h
     │   └── glad
     │       └── glad.h
     ├── README.md
+    ├── run.sh
     └── src
-        ├── fluid_sim.cpp
+        |── fluid_sim.cpp
         ├── glad.c
         └── main.cpp
 
+    5 directories, 10 files
+
 ## Build
-From the root of the workspace, run the build script with:
-    ```bash
-    ./build.sh
-    ```
+From the root workspace, run:
+```bash
+./build.sh
+```
+
+## Run
+```bash
+./run.sh
+```
