@@ -1,38 +1,10 @@
-## Install Dependencies:
-1. Install OpenGL:
-    ```bash
-    sudo apt install mesa-common-dev libgl1-mesa-dev libglu1-mesa-dev mesa-utils
-    ```
-2. Install GLFW and GLM:
-    ```bash
-    sudo apt install libglfw3-dev libglm-dev
-    ```
+# Fluid Simulation Algorithm Expermentations
 
-## Setup GLAD
-1. Visit [Glad Tool](https://glad.dav1d.de/) to get OpenGL bindings for c++.
-![Glad tool config](docs/image.png)
-2. Place `glad.c` in src.
-3. Place the `glad` folder in the `include` directory.
-___
-The project should look like this by now:
+This branch has all the algorithm experimentation for fluid simulations. They all use pygame for rendering and user interactions which admitedly is not very performant and hence the need for an OpenGL and CPP based implementation on the main branch.
 
-    fluid_sim
-    ├── bin
-    ├── build
-    ├── CMakeLists.txt
-    ├── image.png
-    ├── include
-    │   ├── fluid_sim.h
-    │   └── glad
-    │       └── glad.h
-    ├── README.md
-    └── src
-        ├── fluid_sim.cpp
-        ├── glad.c
-        └── main.cpp
+Some use grid-based (Eulerian methods) and other use a lagrangian scheme, usually not very effecitvely.
 
-## Build
-From the root of the workspace, run the build script with:
-    ```bash
-    ./build.sh
-    ```
+The lastest experiment was with eulerian_sim_2.py which draws inspiration from the work of Minute Physics' Eulerian Sim and is the best and actually working simulation so far. 
+
+## NOTE OF WISDOM
+I have also used a fair bit of GenAI for this branch to expedite the process of development, but it came up short and thus the best one is implemented by reading papers and watching youtube videos to understand the famous Navier Stokes Equations. Once this was done, the debugging and handling of boundry conditions was handled by AI assistants.

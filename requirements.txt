@@ -1,0 +1,5 @@
+psutil==6.1.1
+pygame==2.6.1
+pygame-widgets==1.1.7
+snakeviz==2.2.2
+tornado==6.4.2
