@@ -12,6 +12,10 @@ const unsigned int SCR_HEIGHT = 600;
 
 // Shader sources
 unsigned int densityShaderProgram, densityVAO, densityVBO;
+unsigned int velocityShaderProgram, velocityVAO, velocityVBO;
+
+// Visualization toggle
+bool showVelocityVectors = false;
 
 // Additional shader for density field visualization
 const char *densityVertexShaderSource = R"(
@@ -33,6 +37,27 @@ const char *densityFragmentShaderSource = R"(
         // Colormap for density visualization (blue to red)
         vec3 color = mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), density);
         FragColor = vec4(color, min(density * 2.0, 0.8));
+    }
+)";
+
+// Velocity vector visualization shaders
+const char *velocityVertexShaderSource = R"(
+    #version 330 core
+    layout (location = 0) in vec2 aPos;
+    layout (location = 1) in vec3 aColor;
+    out vec3 color;
+    void main() {
+        gl_Position = vec4(aPos, 0.0, 1.0);
+        color = aColor;
+    }
+)";
+
+const char *velocityFragmentShaderSource = R"(
+    #version 330 core
+    in vec3 color;
+    out vec4 FragColor;
+    void main() {
+        FragColor = vec4(color, 0.8);
     }
 )";
 
@@ -85,9 +110,58 @@ void setupShaders()
     glDeleteShader(densityVertexShader);
     glDeleteShader(densityFragmentShader);
 
+    // Compile velocity vector shaders
+    unsigned int velocityVertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(velocityVertexShader, 1, &velocityVertexShaderSource, NULL);
+    glCompileShader(velocityVertexShader);
+
+    // Check for shader compilation errors
+    glGetShaderiv(velocityVertexShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(velocityVertexShader, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::VELOCITY_VERTEX::COMPILATION_FAILED\n"
+                  << infoLog << std::endl;
+    }
+
+    unsigned int velocityFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(velocityFragmentShader, 1, &velocityFragmentShaderSource, NULL);
+    glCompileShader(velocityFragmentShader);
+
+    // Check for shader compilation errors
+    glGetShaderiv(velocityFragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(velocityFragmentShader, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::VELOCITY_FRAGMENT::COMPILATION_FAILED\n"
+                  << infoLog << std::endl;
+    }
+
+    // Link velocity shaders
+    velocityShaderProgram = glCreateProgram();
+    glAttachShader(velocityShaderProgram, velocityVertexShader);
+    glAttachShader(velocityShaderProgram, velocityFragmentShader);
+    glLinkProgram(velocityShaderProgram);
+
+    // Check for linking errors
+    glGetProgramiv(velocityShaderProgram, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        glGetProgramInfoLog(velocityShaderProgram, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::VELOCITY_PROGRAM::LINKING_FAILED\n"
+                  << infoLog << std::endl;
+    }
+
+    glDeleteShader(velocityVertexShader);
+    glDeleteShader(velocityFragmentShader);
+
     // Create density field buffers
     glGenVertexArrays(1, &densityVAO);
     glGenBuffers(1, &densityVBO);
+
+    // Create velocity vector buffers
+    glGenVertexArrays(1, &velocityVAO);
+    glGenBuffers(1, &velocityVBO);
 }
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
@@ -213,6 +287,19 @@ void processInput(GLFWwindow *window)
         sim = FluidSim();
         std::cout << "Simulation reset" << std::endl;
     }
+
+    // Toggle velocity vector visualization with V key
+    static bool vKeyPressed = false;
+    if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS && !vKeyPressed)
+    {
+        showVelocityVectors = !showVelocityVectors;
+        std::cout << "Velocity vectors: " << (showVelocityVectors ? "ON" : "OFF") << std::endl;
+        vKeyPressed = true;
+    }
+    else if (glfwGetKey(window, GLFW_KEY_V) == GLFW_RELEASE)
+    {
+        vKeyPressed = false;
+    }
 }
 
 int main()
@@ -275,7 +362,7 @@ int main()
 
     // Run for 10s for benchmarking
     double startTime = glfwGetTime();
-    while (!glfwWindowShouldClose(window) && (glfwGetTime() - startTime < 10.0))
+    while (!glfwWindowShouldClose(window)/* && (glfwGetTime() - startTime < 10.0)*/)
     {
         // Input
         processInput(window);
@@ -359,6 +446,71 @@ int main()
             glDrawArrays(GL_TRIANGLES, 0, densityVertices.size() / 3);
         }
 
+        // Render velocity vectors if enabled
+        if (showVelocityVectors)
+        {
+            std::vector<float> velocityVertices;
+            
+            // Create velocity vector lines
+            for (int i = 0; i < width; i += 2) // Sample every 2nd cell for better visibility
+            {
+                for (int j = 0; j < height; j += 2)
+                {
+                    glm::vec2 normalizedVel = sim.getNormalizedVelocity(i, j);
+                    float magnitude = sim.getVelocityMagnitude(i, j);
+                    
+                    // Skip cells with very low velocity
+                    if (magnitude < 0.1f)
+                        continue;
+                        
+                    glm::vec3 color = sim.getVelocityColor(i, j);
+                    
+                    // Convert grid coordinates to normalized screen coordinates
+                    float centerX = (float)i / width * 2.0f - 1.0f + (1.0f / width);
+                    float centerY = (float)j / height * 2.0f - 1.0f + (1.0f / height);
+                    
+                    // Scale the vector for visualization
+                    float scale = 0.05f; // Adjust this to make vectors longer/shorter
+                    float endX = centerX + normalizedVel.x * scale;
+                    float endY = centerY + normalizedVel.y * scale;
+                    
+                    // Line from center of cell to direction of velocity
+                    velocityVertices.push_back(centerX);
+                    velocityVertices.push_back(centerY);
+                    velocityVertices.push_back(color.r);
+                    velocityVertices.push_back(color.g);
+                    velocityVertices.push_back(color.b);
+                    
+                    velocityVertices.push_back(endX);
+                    velocityVertices.push_back(endY);
+                    velocityVertices.push_back(color.r);
+                    velocityVertices.push_back(color.g);
+                    velocityVertices.push_back(color.b);
+                }
+            }
+            
+            if (!velocityVertices.empty())
+            {
+                // Upload velocity vector data
+                glBindVertexArray(velocityVAO);
+                glBindBuffer(GL_ARRAY_BUFFER, velocityVBO);
+                glBufferData(GL_ARRAY_BUFFER, velocityVertices.size() * sizeof(float), velocityVertices.data(), GL_DYNAMIC_DRAW);
+                
+                // Position attribute
+                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
+                glEnableVertexAttribArray(0);
+                
+                // Color attribute
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(2 * sizeof(float)));
+                glEnableVertexAttribArray(1);
+                
+                // Draw the velocity vectors
+                glUseProgram(velocityShaderProgram);
+                glLineWidth(2.0f);
+                glDrawArrays(GL_LINES, 0, velocityVertices.size() / 5);
+            }
+        }
+
         // check and call events and swap the buffers
         glfwPollEvents();
         glfwSwapBuffers(window);
@@ -368,6 +520,10 @@ int main()
     glDeleteVertexArrays(1, &densityVAO);
     glDeleteBuffers(1, &densityVBO);
     glDeleteProgram(densityShaderProgram);
+    
+    glDeleteVertexArrays(1, &velocityVAO);
+    glDeleteBuffers(1, &velocityVBO);
+    glDeleteProgram(velocityShaderProgram);
 
     glfwDestroyWindow(window);
     glfwTerminate();

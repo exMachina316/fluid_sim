@@ -28,6 +28,11 @@ public:
     float getDensity(int x, int y) const;
     glm::vec2 getVelocity(int x, int y) const;
 
+    // Velocity visualization methods
+    glm::vec2 getNormalizedVelocity(int x, int y) const;
+    float getVelocityMagnitude(int x, int y) const;
+    glm::vec3 getVelocityColor(int x, int y) const; // Returns RGB color based on speed
+
     int getWidth() const { return width; }
     int getHeight() const { return height; }
 

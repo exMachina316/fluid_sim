@@ -169,6 +169,19 @@ void FluidSim::setBoundary(int b, float x[GRID_SIZE_X][GRID_SIZE_Y])
 // Update velocity field
 void FluidSim::velocityStep(float dt)
 {
+
+    // Add minute random noise to velocity field
+    for (int i = 0; i < width; ++i)
+    {
+        for (int j = 0; j < height; ++j)
+        {
+            float noiseX = ((float)rand() / RAND_MAX - 0.5f) * 1e-4f;
+            float noiseY = ((float)rand() / RAND_MAX - 0.5f) * 1e-4f;
+            velocityX[i][j] += noiseX;
+            velocityY[i][j] += noiseY;
+        }
+    }
+
     // Save previous state
     std::copy(&velocityX[0][0], &velocityX[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityX[0][0]);
     std::copy(&velocityY[0][0], &velocityY[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityY[0][0]);
@@ -241,4 +254,66 @@ glm::vec2 FluidSim::getVelocity(int x, int y) const
         return glm::vec2(velocityX[x][y], velocityY[x][y]);
     }
     return glm::vec2(0.0f);
+}
+
+glm::vec2 FluidSim::getNormalizedVelocity(int x, int y) const
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        glm::vec2 vel = glm::vec2(velocityX[x][y], velocityY[x][y]);
+        float magnitude = glm::length(vel);
+        if (magnitude > 0.001f) // Avoid division by zero
+        {
+            return vel / magnitude;
+        }
+    }
+    return glm::vec2(0.0f);
+}
+
+float FluidSim::getVelocityMagnitude(int x, int y) const
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        return glm::length(glm::vec2(velocityX[x][y], velocityY[x][y]));
+    }
+    return 0.0f;
+}
+
+glm::vec3 FluidSim::getVelocityColor(int x, int y) const
+{
+    float speed = getVelocityMagnitude(x, y);
+
+    // Normalize speed for color mapping (adjust max_speed as needed)
+    const float max_speed = 10.0f;
+    float normalized_speed = std::min(speed / max_speed, 1.0f);
+
+    // Create a color gradient from blue (slow) to red (fast)
+    // Blue -> Cyan -> Green -> Yellow -> Red
+    glm::vec3 color;
+    if (normalized_speed < 0.25f)
+    {
+        // Blue to Cyan
+        float t = normalized_speed / 0.25f;
+        color = glm::vec3(0.0f, t, 1.0f);
+    }
+    else if (normalized_speed < 0.5f)
+    {
+        // Cyan to Green
+        float t = (normalized_speed - 0.25f) / 0.25f;
+        color = glm::vec3(0.0f, 1.0f, 1.0f - t);
+    }
+    else if (normalized_speed < 0.75f)
+    {
+        // Green to Yellow
+        float t = (normalized_speed - 0.5f) / 0.25f;
+        color = glm::vec3(t, 1.0f, 0.0f);
+    }
+    else
+    {
+        // Yellow to Red
+        float t = (normalized_speed - 0.75f) / 0.25f;
+        color = glm::vec3(1.0f, 1.0f - t, 0.0f);
+    }
+
+    return color;
 }
