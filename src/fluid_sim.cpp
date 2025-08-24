@@ -1,164 +1,244 @@
 #include "fluid_sim.h"
-#include <cstdlib>
-#include <unordered_map>
+#include <iostream>
 
-const std::vector<FluidSim::Particle>& FluidSim::getParticles() const {
-    return particles;
-}
-
-void FluidSim::setGravity(const glm::vec2& gravityVector) {
-    gravity = gravityVector;
-}
-
-FluidSim::FluidSim(int numParticles) {
-    particles.resize(numParticles);
-    for (auto& p : particles) {
-        p.position = glm::vec2(static_cast<float>(rand() % 100) / 100.0f,
-                               static_cast<float>(rand() % 100) / 100.0f);
-        p.velocity = glm::vec2(static_cast<float>(rand() % 100) / 100.0f,
-                               static_cast<float>(rand() % 100) / 100.0f);
-    }
-}
-
-void FluidSim::step(float dt) {
-    // Apply gravity and update positions
-    for (auto& p : particles) {
-        p.velocity += gravity * dt;
-        p.position += p.velocity * dt;
-    }
-
-    // Handle particle-particle collisions
-    handleCollisions(dt);
-
-    // Handle boundary conditions
-    for (auto& p : particles) {
-        if (p.position.x < 0.0f) {
-            p.position.x = 0.0f;
-            p.velocity.x *= -0.9f;
-        }
-        if (p.position.x > 1.0f) {
-            p.position.x = 1.0f;
-            p.velocity.x *= -0.9f;
-        }
-        if (p.position.y < 0.0f) {
-            p.position.y = 0.0f;
-            p.velocity.y *= -0.9f;
-        }
-        if (p.position.y > 1.0f) {
-            p.position.y = 1.0f;
-            p.velocity.y *= -0.9f;
+FluidSim::FluidSim() : width(GRID_SIZE_X), height(GRID_SIZE_Y)
+{
+    // Initialize the grid
+    for (int i = 0; i < width; i++)
+    {
+        for (int j = 0; j < height; j++)
+        {
+            density[i][j] = 0.0f;
+            velocityX[i][j] = 0.0f;
+            velocityY[i][j] = 0.0f;
+            prevDensity[i][j] = 0.0f;
+            prevVelocityX[i][j] = 0.0f;
+            prevVelocityY[i][j] = 0.0f;
         }
     }
 }
 
-void FluidSim::handleCollisions(float dt) {
-    const float cellSize = 2.1f * particleRadius; // Slightly larger than particle diameter
+void FluidSim::step(float dt)
+{
+    // Perform velocity and density steps
+    velocityStep(dt);
+    densityStep(dt);
+}
 
-    // Create spatial hash grid (mapping from cell index to particles in that cell)
-    std::unordered_map<int, std::vector<size_t>> grid;
-
-    // Hash function to convert 2D position to 1D cell index
-    auto hashFunction = [cellSize](const glm::vec2& pos) -> int {
-        int x = static_cast<int>(pos.x / cellSize);
-        int y = static_cast<int>(pos.y / cellSize);
-        // Cantor pairing function for combining two integers into one
-        return ((x + y) * (x + y + 1) / 2) + y;
-    };
-
-    // Insert particles into the grid
-    for (size_t i = 0; i < particles.size(); i++) {
-        int cellIndex = hashFunction(particles[i].position);
-        grid[cellIndex].push_back(i);
+// Add source terms to the density/velocity fields
+void FluidSim::addSource(float dest[GRID_SIZE_X][GRID_SIZE_Y], const float source[GRID_SIZE_X][GRID_SIZE_Y], float dt)
+{
+    for (int i = 0; i < width; i++)
+    {
+        for (int j = 0; j < height; j++)
+        {
+            dest[i][j] += dt * source[i][j];
+        }
     }
+}
 
-    // Check for collisions only between particles in the same or neighboring cells
-    for (const auto& cell : grid) {
-        // Get the current cell's particles
-        const auto& cellParticles = cell.second;
+// Diffuse the field using Gauss-Seidel relaxation
+void FluidSim::diffuse(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], const float source[GRID_SIZE_X][GRID_SIZE_Y], float diff, float dt)
+{
+    float a = dt * diff * width * height;
+    float cRecip = 1.0f / (1 + 4 * a);
+    float omega = 1.5f; // Relaxation parameter for SOR
 
-        // Check collisions within this cell
-        for (size_t i = 0; i < cellParticles.size(); i++) {
-            size_t p1Index = cellParticles[i];
-
-            // Check against other particles in the same cell
-            for (size_t j = i + 1; j < cellParticles.size(); j++) {
-                size_t p2Index = cellParticles[j];
-                resolveCollision(p1Index, p2Index);
-            }
-
-            // Generate neighboring cell indices
-            glm::vec2 pos = particles[p1Index].position;
-            int x = static_cast<int>(pos.x / cellSize);
-            int y = static_cast<int>(pos.y / cellSize);
-
-            // Check all 8 neighboring cells
-            for (int nx = x - 1; nx <= x + 1; nx++) {
-                for (int ny = y - 1; ny <= y + 1; ny++) {
-                    // Skip the current cell (already checked)
-                    if (nx == x && ny == y) continue;
-
-                    // Calculate neighbor cell index
-                    int neighborCellIndex = ((nx + ny) * (nx + ny + 1) / 2) + ny;
-
-                    // Check if the neighboring cell exists in our grid
-                    auto neighborIt = grid.find(neighborCellIndex);
-                    if (neighborIt != grid.end()) {
-                        // Check against all particles in the neighboring cell
-                        for (size_t p2Index : neighborIt->second) {
-                            // Avoid duplicate checks (only check if p1 < p2)
-                            if (p1Index < p2Index) {
-                                resolveCollision(p1Index, p2Index);
-                            }
-                        }
-                    }
-                }
+    // Successive Over-Relaxation
+    for (int k = 0; k < 5; k++)
+    { // 20 iterations for stability
+        for (int i = 1; i < width - 1; i++)
+        {
+            for (int j = 1; j < height - 1; j++)
+            {
+                float newValue = (source[i][j] + a * (dest[i + 1][j] + dest[i - 1][j] + dest[i][j + 1] + dest[i][j - 1])) * cRecip;
+                dest[i][j] = dest[i][j] + omega * (newValue - dest[i][j]);
             }
         }
+        setBoundary(b, dest);
     }
 }
 
-void FluidSim::resolveCollision(size_t i, size_t j) {
-    auto& p1 = particles[i];
-    auto& p2 = particles[j];
+// Advect the field using semi-Lagrangian method
+void FluidSim::advect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], const float source[GRID_SIZE_X][GRID_SIZE_Y],
+                      const float u[GRID_SIZE_X][GRID_SIZE_Y], const float v[GRID_SIZE_X][GRID_SIZE_Y], float dt)
+{
+    float dt0 = dt * width;
 
-    // Vector from p1 to p2
-    glm::vec2 diff = p2.position - p1.position;
-    float distance = glm::length(diff);
+    for (int i = 1; i < width - 1; i++)
+    {
+        for (int j = 1; j < height - 1; j++)
+        {
+            // Trace particle position backward
+            float x = i - dt0 * u[i][j];
+            float y = j - dt0 * v[i][j];
 
-    // Check if particles are colliding
-    float minDistance = 2.0f * particleRadius;
-    if (distance < minDistance) {
-        // Normalize the difference vector
-        glm::vec2 collisionNormal = diff;
-        if (distance > 0.0001f) {  // Avoid division by zero
-            collisionNormal /= distance;
-        } else {
-            // If particles are at the same position, use a random direction
-            float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159f;
-            collisionNormal = glm::vec2(cos(angle), sin(angle));
-        }
+            // Clamp to grid bounds
+            x = std::max(0.5f, std::min(width - 1.5f, x));
+            y = std::max(0.5f, std::min(height - 1.5f, y));
 
-        // Move particles apart to prevent overlap
-        float overlap = minDistance - distance;
-        p1.position -= 0.5f * overlap * collisionNormal;
-        p2.position += 0.5f * overlap * collisionNormal;
+            // Find grid cell indices
+            int i0 = static_cast<int>(x);
+            int i1 = i0 + 1;
+            int j0 = static_cast<int>(y);
+            int j1 = j0 + 1;
 
-        // Calculate relative velocity
-        glm::vec2 relativeVelocity = p2.velocity - p1.velocity;
+            // Bilinear interpolation weights
+            float s1 = x - i0;
+            float s0 = 1 - s1;
+            float t1 = y - j0;
+            float t0 = 1 - t1;
 
-        // Calculate impulse
-        float velocityAlongNormal = glm::dot(relativeVelocity, collisionNormal);
-
-        // Only resolve if objects are moving toward each other
-        if (velocityAlongNormal < 0.0f) {
-            // Calculate impulse scalar
-            float j = -(1.0f + restitution) * velocityAlongNormal;
-            j /= 2.0f;  // Assuming equal mass for all particles
-
-            // Apply impulse
-            glm::vec2 impulse = j * collisionNormal;
-            p1.velocity -= impulse;
-            p2.velocity += impulse;
+            // Bilinear interpolation
+            dest[i][j] = s0 * (t0 * source[i0][j0] + t1 * source[i0][j1]) +
+                         s1 * (t0 * source[i1][j0] + t1 * source[i1][j1]);
         }
     }
+    setBoundary(b, dest);
+}
+
+// Project velocity field to be mass-conserving (divergence-free)
+void FluidSim::project(float u[GRID_SIZE_X][GRID_SIZE_Y], float v[GRID_SIZE_X][GRID_SIZE_Y],
+                       float p[GRID_SIZE_X][GRID_SIZE_Y], float div[GRID_SIZE_X][GRID_SIZE_Y])
+{
+    float h = 1.0f / width;
+
+    // Calculate divergence
+    for (int i = 1; i < width - 1; i++)
+    {
+        for (int j = 1; j < height - 1; j++)
+        {
+            div[i][j] = -0.5f * h * (u[i + 1][j] - u[i - 1][j] + v[i][j + 1] - v[i][j - 1]);
+            p[i][j] = 0;
+        }
+    }
+    setBoundary(0, div);
+    setBoundary(0, p);
+
+    // Solve Poisson equation
+    for (int k = 0; k < 20; k++)
+    {
+        for (int i = 1; i < width - 1; i++)
+        {
+            for (int j = 1; j < height - 1; j++)
+            {
+                p[i][j] = (div[i][j] + p[i + 1][j] + p[i - 1][j] +
+                           p[i][j + 1] + p[i][j - 1]) /
+                          4;
+            }
+        }
+        setBoundary(0, p);
+    }
+
+    // Apply pressure gradient to velocity
+    for (int i = 1; i < width - 1; i++)
+    {
+        for (int j = 1; j < height - 1; j++)
+        {
+            u[i][j] -= 0.5f * (p[i + 1][j] - p[i - 1][j]) / h;
+            v[i][j] -= 0.5f * (p[i][j + 1] - p[i][j - 1]) / h;
+        }
+    }
+    setBoundary(1, u);
+    setBoundary(2, v);
+}
+
+// Set boundary conditions
+void FluidSim::setBoundary(int b, float x[GRID_SIZE_X][GRID_SIZE_Y])
+{
+    // Walls
+    for (int i = 1; i < width - 1; i++)
+    {
+        x[i][0] = b == 2 ? -x[i][1] : x[i][1];
+        x[i][height - 1] = b == 2 ? -x[i][height - 2] : x[i][height - 2];
+    }
+
+    for (int j = 1; j < height - 1; j++)
+    {
+        x[0][j] = b == 1 ? -x[1][j] : x[1][j];
+        x[width - 1][j] = b == 1 ? -x[width - 2][j] : x[width - 2][j];
+    }
+
+    // Corners
+    x[0][0] = 0.5f * (x[1][0] + x[0][1]);
+    x[0][height - 1] = 0.5f * (x[1][height - 1] + x[0][height - 2]);
+    x[width - 1][0] = 0.5f * (x[width - 2][0] + x[width - 1][1]);
+    x[width - 1][height - 1] = 0.5f * (x[width - 2][height - 1] + x[width - 1][height - 2]);
+}
+
+// Update velocity field
+void FluidSim::velocityStep(float dt)
+{
+    // Save previous state
+    std::copy(&velocityX[0][0], &velocityX[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityX[0][0]);
+    std::copy(&velocityY[0][0], &velocityY[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityY[0][0]);
+
+    // Diffuse velocity
+    diffuse(1, velocityX, prevVelocityX, VISCOSITY, dt);
+    diffuse(2, velocityY, prevVelocityY, VISCOSITY, dt);
+
+    // Project to ensure mass conservation
+    project(velocityX, velocityY, prevVelocityX, prevVelocityY);
+
+    // Save state before advection
+    std::copy(&velocityX[0][0], &velocityX[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityX[0][0]);
+    std::copy(&velocityY[0][0], &velocityY[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityY[0][0]);
+
+    // Advect velocity field
+    advect(1, velocityX, prevVelocityX, prevVelocityX, prevVelocityY, dt);
+    advect(2, velocityY, prevVelocityY, prevVelocityX, prevVelocityY, dt);
+
+    // Project again
+    project(velocityX, velocityY, prevVelocityX, prevVelocityY);
+}
+
+// Update density field
+void FluidSim::densityStep(float dt)
+{
+    // Save previous state
+    std::copy(&density[0][0], &density[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevDensity[0][0]);
+
+    // Diffuse density
+    diffuse(0, density, prevDensity, DIFFUSION, dt);
+
+    // Save state before advection
+    std::copy(&density[0][0], &density[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevDensity[0][0]);
+
+    // Advect density field
+    advect(0, density, prevDensity, velocityX, velocityY, dt);
+}
+
+void FluidSim::addDensity(int x, int y, float amount)
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        density[x][y] += amount;
+    }
+}
+
+void FluidSim::addVelocity(int x, int y, float amountX, float amountY)
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        velocityX[x][y] += amountX;
+        velocityY[x][y] += amountY;
+    }
+}
+
+float FluidSim::getDensity(int x, int y) const
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        return density[x][y];
+    }
+    return 0.0f;
+}
+
+glm::vec2 FluidSim::getVelocity(int x, int y) const
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        return glm::vec2(velocityX[x][y], velocityY[x][y]);
+    }
+    return glm::vec2(0.0f);
 }

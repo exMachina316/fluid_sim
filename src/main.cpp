@@ -4,200 +4,221 @@
 #include <vector>
 #include <iostream>
 
-FluidSim sim(1000);
-
-// Gravity control
-float gravityAngle = 270.0f; // Down by default (in degrees)
-float gravityStrength = 9.8f; // Default gravity strength
-const float ANGLE_INCREMENT = 5.0f; // Rotation speed in degrees
+FluidSim sim;
 
 // settings
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
 // Shader sources
-unsigned int shaderProgram;
-unsigned int VAO, VBO;
+unsigned int densityShaderProgram, densityVAO, densityVBO;
 
-// Vertex Shader
-const char* vertexShaderSource = R"(
+// Additional shader for density field visualization
+const char *densityVertexShaderSource = R"(
     #version 330 core
     layout (location = 0) in vec2 aPos;
+    layout (location = 1) in float aDensity;
+    out float density;
     void main() {
-        gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);
-        gl_PointSize = 5.0;
+        gl_Position = vec4(aPos, 0.0, 1.0);
+        density = aDensity;
     }
 )";
 
-// Fragment Shader
-const char* fragmentShaderSource = R"(
+const char *densityFragmentShaderSource = R"(
     #version 330 core
+    in float density;
     out vec4 FragColor;
-    uniform vec4 color = vec4(0.0f, 0.5f, 1.0f, 1.0f); // Default blue color
     void main() {
-        FragColor = color;
+        // Colormap for density visualization (blue to red)
+        vec3 color = mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), density);
+        FragColor = vec4(color, min(density * 2.0, 0.8));
     }
 )";
 
-void setupShaders() {
-    // Compile vertex shader
-    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
+void setupShaders()
+{
+    // Compile density field shaders
+    unsigned int densityVertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(densityVertexShader, 1, &densityVertexShaderSource, NULL);
+    glCompileShader(densityVertexShader);
 
     // Check for shader compilation errors
     int success;
     char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
+    glGetShaderiv(densityVertexShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(densityVertexShader, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::DENSITY_VERTEX::COMPILATION_FAILED\n"
+                  << infoLog << std::endl;
     }
 
-    // Compile fragment shader
-    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
+    unsigned int densityFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(densityFragmentShader, 1, &densityFragmentShaderSource, NULL);
+    glCompileShader(densityFragmentShader);
 
     // Check for shader compilation errors
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
+    glGetShaderiv(densityFragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(densityFragmentShader, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::DENSITY_FRAGMENT::COMPILATION_FAILED\n"
+                  << infoLog << std::endl;
     }
 
-    // Link shaders
-    shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
+    // Link density shaders
+    densityShaderProgram = glCreateProgram();
+    glAttachShader(densityShaderProgram, densityVertexShader);
+    glAttachShader(densityShaderProgram, densityFragmentShader);
+    glLinkProgram(densityShaderProgram);
 
     // Check for linking errors
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
+    glGetProgramiv(densityShaderProgram, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        glGetProgramInfoLog(densityShaderProgram, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::DENSITY_PROGRAM::LINKING_FAILED\n"
+                  << infoLog << std::endl;
     }
 
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
+    glDeleteShader(densityVertexShader);
+    glDeleteShader(densityFragmentShader);
 
-    // Create buffers
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
+    // Create density field buffers
+    glGenVertexArrays(1, &densityVAO);
+    glGenBuffers(1, &densityVBO);
 }
 
-void renderParticles() {
-    // Get particles from simulation
-    const auto& particles = sim.getParticles();
-
-    // Create a vector of positions from particle data
-    std::vector<float> positions;
-    positions.reserve(particles.size() * 2); // x, y for each particle
-
-    for (const auto& p : particles) {
-        positions.push_back(p.position.x*2.0 - 1);
-        positions.push_back(p.position.y*2.0 - 1);
-    }
-
-    // Bind buffers and update data
-    glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, positions.size() * sizeof(float), positions.data(), GL_DYNAMIC_DRAW);
-
-    // Set vertex attributes
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    // Render particles
-    glUseProgram(shaderProgram);
-    glDrawArrays(GL_POINTS, 0, particles.size());
-
-    // Unbind
-    // glBindVertexArray(0);
-}
-
-void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
     glViewport(0, 0, width, height);
 }
 
-void renderGravityVector() {
-    // Create a directional indicator for gravity
-    float angleRad = gravityAngle * (3.14159f / 180.0f);
-    float startX = 0.0f;
-    float startY = 0.0f;
-    float endX = 0.3f * std::cos(angleRad);
-    float endY = 0.3f * std::sin(angleRad);
-    
-    float vertices[] = {
-        startX, startY,
-        endX, endY
-    };
-    
-    // Use a separate VAO/VBO for the gravity vector
-    unsigned int vectorVAO, vectorVBO;
-    glGenVertexArrays(1, &vectorVAO);
-    glGenBuffers(1, &vectorVBO);
-    
-    glBindVertexArray(vectorVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, vectorVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-    
-    // Change color to red for the gravity vector
-    glUseProgram(shaderProgram);
-    int colorLocation = glGetUniformLocation(shaderProgram, "color");
-    glUniform4f(colorLocation, 1.0f, 0.0f, 0.0f, 1.0f);
-    
-    // Draw the line
-    glLineWidth(3.0f);
-    glDrawArrays(GL_LINES, 0, 2);
-    
-    // Reset color to default for particles
-    glUniform4f(colorLocation, 0.0f, 0.5f, 1.0f, 1.0f);
-    
-    // Cleanup
-    glDeleteVertexArrays(1, &vectorVAO);
-    glDeleteBuffers(1, &vectorVBO);
+// Mouse position tracking
+double lastMouseX = 0.0, lastMouseY = 0.0;
+bool mouseLeftPressed = false;
+bool mouseRightPressed = false;
+bool firstMouse = true;
+
+// Mouse callback function
+void mouse_callback(GLFWwindow *window, double xpos, double ypos)
+{
+    if (firstMouse)
+    {
+        lastMouseX = xpos;
+        lastMouseY = ypos;
+        firstMouse = false;
+        return;
+    }
+
+    // Calculate mouse movement
+    double deltaX = xpos - lastMouseX;
+    double deltaY = ypos - lastMouseY;
+
+    // Store current position for next frame
+    lastMouseX = xpos;
+    lastMouseY = ypos;
+
+    // If mouse is pressed, apply force to fluid
+    if (mouseLeftPressed)
+    {
+        // Convert screen coordinates to simulation space (-1,1)
+        float normX = (2.0f * xpos / SCR_WIDTH) - 1.0f;
+        float normY = 1.0f - (2.0f * ypos / SCR_HEIGHT);
+
+        // Convert normalized coordinates to grid coordinates
+        int gridX = static_cast<int>((normX + 1.0f) * 0.5f * GRID_SIZE_X);
+        int gridY = static_cast<int>((normY + 1.0f) * 0.5f * GRID_SIZE_Y);
+
+        // Add velocity in the direction of mouse movement
+        float velocityScaleFactor = 5.0f;
+        float dx = deltaX / SCR_WIDTH * velocityScaleFactor;
+        float dy = -deltaY / SCR_HEIGHT * velocityScaleFactor; // Invert Y for screen coordinates
+
+        // Apply velocity and density to a small area around the cursor
+        for (int i = -3; i <= 3; i++)
+        {
+            for (int j = -3; j <= 3; j++)
+            {
+                int x = gridX + i;
+                int y = gridY + j;
+                if (x >= 0 && x < GRID_SIZE_X && y >= 0 && y < GRID_SIZE_Y)
+                {
+                    // Use the public methods we added
+                    sim.addVelocity(x, y, dx, dy);
+                }
+            }
+        }
+    } else if (mouseRightPressed)
+    {
+        // Convert screen coordinates to simulation space (-1,1)
+        float normX = (2.0f * xpos / SCR_WIDTH) - 1.0f;
+        float normY = 1.0f - (2.0f * ypos / SCR_HEIGHT);
+
+        // Convert normalized coordinates to grid coordinates
+        int gridX = static_cast<int>((normX + 1.0f) * 0.5f * GRID_SIZE_X);
+        int gridY = static_cast<int>((normY + 1.0f) * 0.5f * GRID_SIZE_Y);
+
+        // Apply density to a small area around the cursor
+        for (int i = -3; i <= 3; i++)
+        {
+            for (int j = -3; j <= 3; j++)
+            {
+                int x = gridX + i;
+                int y = gridY + j;
+                if (x >= 0 && x < GRID_SIZE_X && y >= 0 && y < GRID_SIZE_Y)
+                {
+                    // Use the public methods we added
+                    sim.addDensity(x, y, 1.0f);
+                }
+            }
+        }
+    }
+}
+
+// Mouse button callback
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
+{
+    if (button == GLFW_MOUSE_BUTTON_LEFT)
+    {
+        if (action == GLFW_PRESS)
+        {
+            mouseLeftPressed = true;
+        }
+        else if (action == GLFW_RELEASE)
+        {
+            mouseLeftPressed = false;
+        }
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        if (action == GLFW_PRESS)
+        {
+            mouseRightPressed = true;
+        }
+        else if (action == GLFW_RELEASE)
+        {
+            mouseRightPressed = false;
+        }
+    }
 }
 
 void processInput(GLFWwindow *window)
 {
-    if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
-        
-    // Gravity direction controls
-    if(glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-        gravityAngle += ANGLE_INCREMENT;
-        if(gravityAngle >= 360.0f) gravityAngle -= 360.0f;
+
+    // Reset simulation with R key
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS)
+    {
+        sim = FluidSim();
+        std::cout << "Simulation reset" << std::endl;
     }
-    if(glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-        gravityAngle -= ANGLE_INCREMENT;
-        if(gravityAngle < 0.0f) gravityAngle += 360.0f;
-    }
-    
-    // Gravity strength controls
-    if(glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-        gravityStrength += 0.1f;
-        std::cout << "Gravity Strength: " << gravityStrength << std::endl;
-    }
-    if(glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-        gravityStrength = std::max(0.0f, gravityStrength - 0.1f);
-        std::cout << "Gravity Strength: " << gravityStrength << std::endl;
-    }
-    
-    // Convert angle to radians and update simulation gravity
-    float angleRad = gravityAngle * (3.14159f / 180.0f);
-    float gravityX = gravityStrength * std::cos(angleRad);
-    float gravityY = gravityStrength * std::sin(angleRad);
-    sim.setGravity(glm::vec2(gravityX, gravityY));
 }
 
-int main() {
-    if (!glfwInit()) {
+int main()
+{
+    if (!glfwInit())
+    {
         return -1;
     }
 
@@ -207,8 +228,9 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     // glfw window creation
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Fluid Sim", NULL, NULL);
-    if (!window) {
+    GLFWwindow *window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Fluid Sim", NULL, NULL);
+    if (!window)
+    {
         std::cout << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
         return -1;
@@ -217,9 +239,12 @@ int main() {
     // Set the OpenGL context version
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
 
     // Initialize GLAD after creating the context
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
         std::cout << "Failed to initialize GLAD" << std::endl;
         return -1;
     }
@@ -232,20 +257,107 @@ int main() {
 
     // Setup shaders and buffers
     setupShaders();
-    glEnable(GL_PROGRAM_POINT_SIZE);
 
-    // Run for 20s
+    // Add initial density and velocity for benchmarking
+    int centerX = sim.getWidth() / 2;
+    int centerY = sim.getHeight() / 2;
+    for (int i = -5; i <= 5; i++)
+    {
+        for (int j = -5; j <= 5; j++)
+        {
+            if (i * i + j * j < 25)
+            { // circular area
+                sim.addDensity(centerX + i, centerY + j, 10.0f);
+                sim.addVelocity(centerX + i, centerY + j, 0.0f, 2.0f);
+            }
+        }
+    }
 
-    while (!glfwWindowShouldClose(window)) {
+    // Run for 10s for benchmarking
+    double startTime = glfwGetTime();
+    while (!glfwWindowShouldClose(window) && (glfwGetTime() - startTime < 10.0))
+    {
         // Input
         processInput(window);
 
-        // Redering code here
+        // Rendering code here
         glClear(GL_COLOR_BUFFER_BIT);
 
+        // Enable blending for transparent fluid rendering
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // Step the simulation
         sim.step(0.01f);
-        renderParticles();
-        renderGravityVector();
+
+        // Render the density field as a grid of quads
+        int width = sim.getWidth();
+        int height = sim.getHeight();
+        std::vector<float> densityVertices;
+
+        // Create a vertex for each density cell (with normalized coordinates)
+        for (int i = 0; i < width; i++)
+        {
+            for (int j = 0; j < height; j++)
+            {
+                float x = (float)i / width * 2.0f - 1.0f;
+                float y = (float)j / height * 2.0f - 1.0f;
+                float cellWidth = 2.0f / width;
+                float cellHeight = 2.0f / height;
+                float density = sim.getDensity(i, j);
+
+                // Skip cells with no density for efficiency
+                if (density < 0.01f)
+                    continue;
+
+                // Create a quad for this cell
+                // Triangle 1
+                densityVertices.push_back(x);
+                densityVertices.push_back(y);
+                densityVertices.push_back(density);
+
+                densityVertices.push_back(x + cellWidth);
+                densityVertices.push_back(y);
+                densityVertices.push_back(density);
+
+                densityVertices.push_back(x);
+                densityVertices.push_back(y + cellHeight);
+                densityVertices.push_back(density);
+
+                // Triangle 2
+                densityVertices.push_back(x + cellWidth);
+                densityVertices.push_back(y);
+                densityVertices.push_back(density);
+
+                densityVertices.push_back(x + cellWidth);
+                densityVertices.push_back(y + cellHeight);
+                densityVertices.push_back(density);
+
+                densityVertices.push_back(x);
+                densityVertices.push_back(y + cellHeight);
+                densityVertices.push_back(density);
+            }
+        }
+
+        // Render density field if we have any vertices
+        if (!densityVertices.empty())
+        {
+            glBindVertexArray(densityVAO);
+            glBindBuffer(GL_ARRAY_BUFFER, densityVBO);
+            glBufferData(GL_ARRAY_BUFFER, densityVertices.size() * sizeof(float), densityVertices.data(), GL_DYNAMIC_DRAW);
+
+            // Position attribute
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+            glEnableVertexAttribArray(0);
+
+            // Density attribute
+            glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)(2 * sizeof(float)));
+            glEnableVertexAttribArray(1);
+
+            // Draw the density field
+            glUseProgram(densityShaderProgram);
+            glDrawArrays(GL_TRIANGLES, 0, densityVertices.size() / 3);
+        }
 
         // check and call events and swap the buffers
         glfwPollEvents();
@@ -253,9 +365,9 @@ int main() {
     }
 
     // Cleanup
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
-    glDeleteProgram(shaderProgram);
+    glDeleteVertexArrays(1, &densityVAO);
+    glDeleteBuffers(1, &densityVBO);
+    glDeleteProgram(densityShaderProgram);
 
     glfwDestroyWindow(window);
     glfwTerminate();

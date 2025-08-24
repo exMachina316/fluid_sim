@@ -19,3 +19,6 @@ target_include_directories(fluid_sim PRIVATE include ${GLFW_INCLUDE_DIRS})
 
 # Link libraries
 target_link_libraries(fluid_sim OpenGL::GL glfw)
+
+# Add optimization and debug flags
+target_compile_options(fluid_sim PRIVATE -O2 -g)
