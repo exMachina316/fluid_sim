@@ -8,8 +8,8 @@
 #include <memory>
 
 // Grid-based Eulerian fluid simulation parameters
-const int GRID_SIZE_X = 64;
-const int GRID_SIZE_Y = 64;
+const int GRID_SIZE_X = 200;
+const int GRID_SIZE_Y = 200;
 const float VISCOSITY = 0.0001f;
 const float DIFFUSION = 0.0f;
 const float PRESSURE = 0.5f;

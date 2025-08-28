@@ -63,7 +63,7 @@ void FluidSim::diffuse(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], const float 
 
 // Semi-Lagrangian advection (original method)
 void FluidSim::semiLagrangianAdvect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], const float source[GRID_SIZE_X][GRID_SIZE_Y],
-                      const float u[GRID_SIZE_X][GRID_SIZE_Y], const float v[GRID_SIZE_X][GRID_SIZE_Y], float dt)
+                                    const float u[GRID_SIZE_X][GRID_SIZE_Y], const float v[GRID_SIZE_X][GRID_SIZE_Y], float dt)
 {
     float dt0 = dt * width;
 
@@ -104,7 +104,7 @@ void FluidSim::macCormackAdvect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], con
                                 const float u[GRID_SIZE_X][GRID_SIZE_Y], const float v[GRID_SIZE_X][GRID_SIZE_Y], float dt)
 {
     float dt0 = dt * width;
-    
+
     // Step 1: Forward advection (predictor step)
     // Use semi-Lagrangian method to advect forward
     for (int i = 1; i < width - 1; i++)
@@ -137,7 +137,7 @@ void FluidSim::macCormackAdvect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], con
         }
     }
     setBoundary(b, tempField1);
-    
+
     // Step 2: Backward advection (corrector step)
     // Advect the result from step 1 backward in time
     for (int i = 1; i < width - 1; i++)
@@ -170,7 +170,7 @@ void FluidSim::macCormackAdvect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], con
         }
     }
     setBoundary(b, tempField2);
-    
+
     // Step 3: Calculate error and apply correction
     for (int i = 1; i < width - 1; i++)
     {
@@ -178,26 +178,29 @@ void FluidSim::macCormackAdvect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], con
         {
             // Calculate the error between original and round-trip advection
             float error = source[i][j] - tempField2[i][j];
-            
+
             // Apply MacCormack correction: result = forward_advection + 0.5 * error
             dest[i][j] = tempField1[i][j] + 0.5f * error;
-            
+
             // Optional: clamp to prevent overshoots (helps with stability)
             // Find min/max in the neighborhood for clamping
             float minVal = source[i][j];
             float maxVal = source[i][j];
-            
-            for (int di = -1; di <= 1; di++) {
-                for (int dj = -1; dj <= 1; dj++) {
+
+            for (int di = -1; di <= 1; di++)
+            {
+                for (int dj = -1; dj <= 1; dj++)
+                {
                     int ni = i + di;
                     int nj = j + dj;
-                    if (ni >= 0 && ni < width && nj >= 0 && nj < height) {
+                    if (ni >= 0 && ni < width && nj >= 0 && nj < height)
+                    {
                         minVal = std::min(minVal, source[ni][nj]);
                         maxVal = std::max(maxVal, source[ni][nj]);
                     }
                 }
             }
-            
+
             // Clamp the result to prevent overshoots
             dest[i][j] = std::max(minVal, std::min(maxVal, dest[i][j]));
         }
@@ -210,18 +213,18 @@ void FluidSim::advect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], const float s
                       const float u[GRID_SIZE_X][GRID_SIZE_Y], const float v[GRID_SIZE_X][GRID_SIZE_Y], float dt)
 {
     // Available advection methods (uncomment desired method):
-    // 
+    //
     // RK4 - Uses 4th order Runge-Kutta integration for particle tracing
     //       Highest accuracy, preserves fine details, but computationally expensive
-    rk4Advect(b, dest, source, u, v, dt);                    
-    
+    rk4Advect(b, dest, source, u, v, dt);
+
     // MacCormack - Two-step predictor-corrector method with error correction
     //              Good balance of accuracy and performance, reduces numerical diffusion
-    // macCormackAdvect(b, dest, source, u, v, dt);          
-    
+    // macCormackAdvect(b, dest, source, u, v, dt);
+
     // Semi-Lagrangian - Basic backward particle tracing with bilinear interpolation
     //                   Fastest but most diffusive, good for real-time applications
-    // semiLagrangianAdvect(b, dest, source, u, v, dt);      
+    // semiLagrangianAdvect(b, dest, source, u, v, dt);
 }
 
 // Helper method for bilinear interpolation
@@ -266,27 +269,27 @@ void FluidSim::rk4Advect(int b, float dest[GRID_SIZE_X][GRID_SIZE_Y], const floa
         {
             float x = static_cast<float>(i);
             float y = static_cast<float>(j);
-            
+
             // RK4 integration to find particle's original position
             // k1: initial velocity at current position
             glm::vec2 k1 = getVelocityAt(u, v, x, y) * (-dt0);
-            
+
             // k2: velocity at midpoint using k1
             glm::vec2 pos2 = glm::vec2(x, y) + k1 * 0.5f;
             glm::vec2 k2 = getVelocityAt(u, v, pos2.x, pos2.y) * (-dt0);
-            
+
             // k3: velocity at midpoint using k2
             glm::vec2 pos3 = glm::vec2(x, y) + k2 * 0.5f;
             glm::vec2 k3 = getVelocityAt(u, v, pos3.x, pos3.y) * (-dt0);
-            
+
             // k4: velocity at endpoint using k3
             glm::vec2 pos4 = glm::vec2(x, y) + k3;
             glm::vec2 k4 = getVelocityAt(u, v, pos4.x, pos4.y) * (-dt0);
-            
+
             // RK4 weighted average
             glm::vec2 displacement = (k1 + 2.0f * k2 + 2.0f * k3 + k4) / 6.0f;
             glm::vec2 sourcePos = glm::vec2(x, y) + displacement;
-            
+
             // Interpolate the value at the source position
             dest[i][j] = bilinearInterpolate(source, sourcePos.x, sourcePos.y);
         }

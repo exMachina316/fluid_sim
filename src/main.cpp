@@ -7,8 +7,8 @@
 FluidSim sim;
 
 // settings
-const unsigned int SCR_WIDTH = 800;
-const unsigned int SCR_HEIGHT = 600;
+unsigned int SCR_WIDTH = 800;
+unsigned int SCR_HEIGHT = 600;
 
 // Shader sources
 unsigned int densityShaderProgram, densityVAO, densityVBO;
@@ -166,6 +166,8 @@ void setupShaders()
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
+    SCR_WIDTH = width;
+    SCR_HEIGHT = height;
     glViewport(0, 0, width, height);
 }
 
@@ -206,7 +208,7 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
         int gridY = static_cast<int>((normY + 1.0f) * 0.5f * GRID_SIZE_Y);
 
         // Add velocity in the direction of mouse movement
-        float velocityScaleFactor = 5.0f;
+        float velocityScaleFactor = 10.0f;
         float dx = deltaX / SCR_WIDTH * velocityScaleFactor;
         float dy = -deltaY / SCR_HEIGHT * velocityScaleFactor; // Invert Y for screen coordinates
 
