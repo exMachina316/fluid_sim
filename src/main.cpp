@@ -1,6 +1,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "fluid_sim.h"
+#include "flip_sim.h"
 #include <vector>
 #include <iostream>
 
