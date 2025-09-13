@@ -14,6 +14,8 @@ FluidSim::FluidSim() : width(GRID_SIZE_X), height(GRID_SIZE_Y)
             prevDensity[i][j] = 0.0f;
             prevVelocityX[i][j] = 0.0f;
             prevVelocityY[i][j] = 0.0f;
+            pressure[i][j] = 0.0f;
+            divergence[i][j] = 0.0f;
             tempField1[i][j] = 0.0f;
             tempField2[i][j] = 0.0f;
         }
@@ -310,6 +312,7 @@ void FluidSim::project(float u[GRID_SIZE_X][GRID_SIZE_Y], float v[GRID_SIZE_X][G
         {
             div[i][j] = -0.5f * h * (u[i + 1][j] - u[i - 1][j] + v[i][j + 1] - v[i][j - 1]);
             p[i][j] = 0;
+            maxDivergence = std::max(maxDivergence, std::abs(div[i][j]));
         }
     }
     setBoundary(0, div);
@@ -325,6 +328,7 @@ void FluidSim::project(float u[GRID_SIZE_X][GRID_SIZE_Y], float v[GRID_SIZE_X][G
                 p[i][j] = (div[i][j] + p[i + 1][j] + p[i - 1][j] +
                            p[i][j + 1] + p[i][j - 1]) /
                           4;
+                maxPressure = std::max(maxPressure, std::abs(p[i][j]));
             }
         }
         setBoundary(0, p);
@@ -369,30 +373,6 @@ void FluidSim::setBoundary(int b, float x[GRID_SIZE_X][GRID_SIZE_Y])
 // Update velocity field
 void FluidSim::velocityStep(float dt)
 {
-
-    // Add minute random noise to velocity field
-    for (int i = 0; i < width; ++i)
-    {
-        for (int j = 0; j < height; ++j)
-        {
-            float noiseX = ((float)rand() / RAND_MAX - 0.5f) * 1e-4f;
-            float noiseY = ((float)rand() / RAND_MAX - 0.5f) * 1e-4f;
-            velocityX[i][j] += noiseX;
-            velocityY[i][j] += noiseY;
-        }
-    }
-
-    // Save previous state
-    std::copy(&velocityX[0][0], &velocityX[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityX[0][0]);
-    std::copy(&velocityY[0][0], &velocityY[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityY[0][0]);
-
-    // Diffuse velocity
-    diffuse(1, velocityX, prevVelocityX, VISCOSITY, dt);
-    diffuse(2, velocityY, prevVelocityY, VISCOSITY, dt);
-
-    // Project to ensure mass conservation
-    project(velocityX, velocityY, prevVelocityX, prevVelocityY);
-
     // Save state before advection
     std::copy(&velocityX[0][0], &velocityX[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityX[0][0]);
     std::copy(&velocityY[0][0], &velocityY[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityY[0][0]);
@@ -401,8 +381,8 @@ void FluidSim::velocityStep(float dt)
     advect(1, velocityX, prevVelocityX, prevVelocityX, prevVelocityY, dt);
     advect(2, velocityY, prevVelocityY, prevVelocityX, prevVelocityY, dt);
 
-    // Project again
-    project(velocityX, velocityY, prevVelocityX, prevVelocityY);
+    // Project to enforce mass conservation
+    project(velocityX, velocityY, pressure, divergence);
 }
 
 // Update density field
@@ -410,9 +390,6 @@ void FluidSim::densityStep(float dt)
 {
     // Save previous state
     std::copy(&density[0][0], &density[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevDensity[0][0]);
-
-    // Diffuse density
-    diffuse(0, density, prevDensity, DIFFUSION, dt);
 
     // Save state before advection
     std::copy(&density[0][0], &density[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevDensity[0][0]);
@@ -443,6 +420,24 @@ float FluidSim::getDensity(int x, int y) const
     if (x >= 0 && x < width && y >= 0 && y < height)
     {
         return density[x][y];
+    }
+    return 0.0f;
+}
+
+float FluidSim::getNormalizedPressure(int x, int y) const
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        return sqrt(pressure[x][y]/maxPressure);
+    }
+    return 0.0f;
+}
+
+float FluidSim::getNormalizedDivergence(int x, int y) const
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+    {
+        return sqrt(divergence[x][y]/maxDivergence);
     }
     return 0.0f;
 }
@@ -483,35 +478,31 @@ glm::vec3 FluidSim::getVelocityColor(int x, int y) const
 {
     float speed = getVelocityMagnitude(x, y);
 
-    // Normalize speed for color mapping (adjust max_speed as needed)
-    const float max_speed = 10.0f;
-    float normalized_speed = std::min(speed / max_speed, 1.0f);
-
     // Create a color gradient from blue (slow) to red (fast)
     // Blue -> Cyan -> Green -> Yellow -> Red
     glm::vec3 color;
-    if (normalized_speed < 0.25f)
+    if (speed < 0.25f)
     {
         // Blue to Cyan
-        float t = normalized_speed / 0.25f;
+        float t = speed / 0.25f;
         color = glm::vec3(0.0f, t, 1.0f);
     }
-    else if (normalized_speed < 0.5f)
+    else if (speed < 0.5f)
     {
         // Cyan to Green
-        float t = (normalized_speed - 0.25f) / 0.25f;
+        float t = (speed - 0.25f) / 0.25f;
         color = glm::vec3(0.0f, 1.0f, 1.0f - t);
     }
-    else if (normalized_speed < 0.75f)
+    else if (speed < 0.75f)
     {
         // Green to Yellow
-        float t = (normalized_speed - 0.5f) / 0.25f;
+        float t = (speed - 0.5f) / 0.25f;
         color = glm::vec3(t, 1.0f, 0.0f);
     }
     else
     {
         // Yellow to Red
-        float t = (normalized_speed - 0.75f) / 0.25f;
+        float t = (speed - 0.75f) / 0.25f;
         color = glm::vec3(1.0f, 1.0f - t, 0.0f);
     }
 

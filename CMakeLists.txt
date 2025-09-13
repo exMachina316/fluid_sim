@@ -12,7 +12,7 @@ find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 
 # Add source files
-add_executable(fluid_sim src/main.cpp src/glad.c src/fluid_sim.cpp)
+add_executable(fluid_sim src/main.cpp src/glad.c src/fluid_sim.cpp src/flip_sim.cpp)
 
 # Include directories
 target_include_directories(fluid_sim PRIVATE include ${GLFW_INCLUDE_DIRS})

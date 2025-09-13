@@ -10,9 +10,6 @@
 // Grid-based Eulerian fluid simulation parameters
 const int GRID_SIZE_X = 200;
 const int GRID_SIZE_Y = 200;
-const float VISCOSITY = 0.0001f;
-const float DIFFUSION = 0.0f;
-const float PRESSURE = 0.5f;
 
 class FluidSim
 {
@@ -26,6 +23,8 @@ public:
 
     // Methods to access grid data for rendering
     float getDensity(int x, int y) const;
+    float getNormalizedPressure(int x, int y) const;
+    float getNormalizedDivergence(int x, int y) const;
     glm::vec2 getVelocity(int x, int y) const;
 
     // Velocity visualization methods
@@ -35,6 +34,9 @@ public:
 
     int getWidth() const { return width; }
     int getHeight() const { return height; }
+
+    float maxPressure = 0.0f;
+    float maxDivergence = 0.0f;
 
 private:
     // Grid properties
@@ -47,6 +49,8 @@ private:
     float prevDensity[GRID_SIZE_X][GRID_SIZE_Y];
     float prevVelocityX[GRID_SIZE_X][GRID_SIZE_Y];
     float prevVelocityY[GRID_SIZE_X][GRID_SIZE_Y];
+    float pressure[GRID_SIZE_X][GRID_SIZE_Y];
+    float divergence[GRID_SIZE_X][GRID_SIZE_Y];
     
     // Additional temporary arrays for MacCormack advection
     float tempField1[GRID_SIZE_X][GRID_SIZE_Y];
