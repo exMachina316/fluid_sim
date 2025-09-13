@@ -386,11 +386,6 @@ void FluidSim::velocityStep(float dt)
     std::copy(&velocityX[0][0], &velocityX[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityX[0][0]);
     std::copy(&velocityY[0][0], &velocityY[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevVelocityY[0][0]);
 
-    // Diffuse velocity
-    diffuse(1, velocityX, prevVelocityX, VISCOSITY, dt);
-    diffuse(2, velocityY, prevVelocityY, VISCOSITY, dt);
-
-    // Project to ensure mass conservation
     project(velocityX, velocityY, prevVelocityX, prevVelocityY);
 
     // Save state before advection
@@ -401,7 +396,7 @@ void FluidSim::velocityStep(float dt)
     advect(1, velocityX, prevVelocityX, prevVelocityX, prevVelocityY, dt);
     advect(2, velocityY, prevVelocityY, prevVelocityX, prevVelocityY, dt);
 
-    // Project again
+    // Project
     project(velocityX, velocityY, prevVelocityX, prevVelocityY);
 }
 
@@ -410,9 +405,6 @@ void FluidSim::densityStep(float dt)
 {
     // Save previous state
     std::copy(&density[0][0], &density[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevDensity[0][0]);
-
-    // Diffuse density
-    diffuse(0, density, prevDensity, DIFFUSION, dt);
 
     // Save state before advection
     std::copy(&density[0][0], &density[0][0] + GRID_SIZE_X * GRID_SIZE_Y, &prevDensity[0][0]);

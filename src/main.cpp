@@ -1,7 +1,6 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "fluid_sim.h"
-#include "flip_sim.h"
 #include <vector>
 #include <iostream>
 
@@ -348,20 +347,9 @@ int main()
     // Setup shaders and buffers
     setupShaders();
 
-    // Add initial density and velocity for benchmarking
+    // // Add initial density and velocity for benchmarking
     int centerX = sim.getWidth() / 2;
     int centerY = sim.getHeight() / 2;
-    for (int i = -5; i <= 5; i++)
-    {
-        for (int j = -5; j <= 5; j++)
-        {
-            if (i * i + j * j < 25)
-            { // circular area
-                sim.addDensity(centerX + i, centerY + j, 10.0f);
-                sim.addVelocity(centerX + i, centerY + j, 0.0f, 2.0f);
-            }
-        }
-    }
 
     // Run for 10s for benchmarking
     double startTime = glfwGetTime();
@@ -376,6 +364,19 @@ int main()
         // Enable blending for transparent fluid rendering
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        for (int i = 0; i <= 5; i++)
+        {
+            for (int j = 0; j <= 5; j++)
+            {
+                // circular area
+                if (i * i + j * j < 25)
+                {
+                    sim.addDensity(centerX + i, centerY + j, 1.0f);
+                    sim.addVelocity(centerX + i, centerY + j, 1.0f, 0.0f);
+                }
+            }
+        }
 
         // Step the simulation
         sim.step(0.01f);
@@ -461,10 +462,6 @@ int main()
                 {
                     glm::vec2 normalizedVel = sim.getNormalizedVelocity(i, j);
                     float magnitude = sim.getVelocityMagnitude(i, j);
-                    
-                    // Skip cells with very low velocity
-                    if (magnitude < 0.1f)
-                        continue;
                         
                     glm::vec3 color = sim.getVelocityColor(i, j);
                     
