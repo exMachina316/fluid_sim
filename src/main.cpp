@@ -12,12 +12,15 @@ unsigned int SCR_HEIGHT = 600;
 
 // Shader sources
 unsigned int densityShaderProgram, densityVAO, densityVBO;
+unsigned int pressureShaderProgram, pressureVAO, pressureVBO;
 unsigned int velocityShaderProgram, velocityVAO, velocityVBO;
 
 // Visualization toggle
 bool showVelocityVectors = false;
+bool showPressureField = false;
+bool showDensityField = true;
 
-// Additional shader for density field visualization
+// Shader for density field visualization
 const char *densityVertexShaderSource = R"(
     #version 330 core
     layout (location = 0) in vec2 aPos;
@@ -37,6 +40,29 @@ const char *densityFragmentShaderSource = R"(
         // Colormap for density visualization (blue to red)
         vec3 color = mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), density);
         FragColor = vec4(color, min(density * 2.0, 0.8));
+    }
+)";
+
+// Shader for pressure field visualization
+const char *pressureVertexShaderSource = R"(
+    #version 330 core
+    layout (location = 0) in vec2 aPos;
+    layout (location = 1) in float aPressure;
+    out float pressure;
+    void main() {
+        gl_Position = vec4(aPos, 0.0, 1.0);
+        pressure = aPressure;
+    }
+)";
+
+const char *pressureFragmentShaderSource = R"(
+    #version 330 core
+    in float pressure;
+    out vec4 FragColor;
+    void main() {
+        // Colormap for pressure visualization (white to black)
+        vec3 color = mix(vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0), pressure);
+        FragColor = vec4(color, 0.8);
     }
 )";
 
@@ -110,6 +136,51 @@ void setupShaders()
     glDeleteShader(densityVertexShader);
     glDeleteShader(densityFragmentShader);
 
+    // Compile pressure field shaders
+    unsigned int pressureVertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(pressureVertexShader, 1, &pressureVertexShaderSource, NULL);
+    glCompileShader(pressureVertexShader);
+
+    // Check for shader compilation errors
+    glGetShaderiv(pressureVertexShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(pressureVertexShader, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::PRESSURE_VERTEX::COMPILATION_FAILED\n"
+                  << infoLog << std::endl;
+    }
+
+    unsigned int pressureFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(pressureFragmentShader, 1, &pressureFragmentShaderSource, NULL);
+    glCompileShader(pressureFragmentShader);
+
+    // Check for shader compilation errors
+    glGetShaderiv(pressureFragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(pressureFragmentShader, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::DENSITY_FRAGMENT::COMPILATION_FAILED\n"
+                  << infoLog << std::endl;
+    }
+
+    // Link density shaders
+    pressureShaderProgram = glCreateProgram();
+    glAttachShader(pressureShaderProgram, pressureVertexShader);
+    glAttachShader(pressureShaderProgram, pressureFragmentShader);
+    glLinkProgram(pressureShaderProgram);
+
+    // Check for linking errors
+    glGetProgramiv(pressureShaderProgram, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        glGetProgramInfoLog(pressureShaderProgram, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::DENSITY_PROGRAM::LINKING_FAILED\n"
+                  << infoLog << std::endl;
+    }
+
+    glDeleteShader(pressureVertexShader);
+    glDeleteShader(pressureFragmentShader);
+
     // Compile velocity vector shaders
     unsigned int velocityVertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(velocityVertexShader, 1, &velocityVertexShaderSource, NULL);
@@ -158,6 +229,10 @@ void setupShaders()
     // Create density field buffers
     glGenVertexArrays(1, &densityVAO);
     glGenBuffers(1, &densityVBO);
+
+    // Create pressure field buffers
+    glGenVertexArrays(1, &pressureVAO);
+    glGenBuffers(1, &pressureVBO);
 
     // Create velocity vector buffers
     glGenVertexArrays(1, &velocityVAO);
@@ -292,15 +367,39 @@ void processInput(GLFWwindow *window)
 
     // Toggle velocity vector visualization with V key
     static bool vKeyPressed = false;
+    static bool pKeyPressed = false;
+    static bool dKeyPressed = false;
+
     if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS && !vKeyPressed)
     {
         showVelocityVectors = !showVelocityVectors;
         std::cout << "Velocity vectors: " << (showVelocityVectors ? "ON" : "OFF") << std::endl;
         vKeyPressed = true;
     }
-    else if (glfwGetKey(window, GLFW_KEY_V) == GLFW_RELEASE)
+    else if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS && !pKeyPressed)
+    {
+        showPressureField = !showPressureField;
+        std::cout << "Pressure field: " << (showPressureField ? "ON" : "OFF") << std::endl;
+        pKeyPressed = true;
+    }
+    else if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS && !dKeyPressed)
+    {
+        showDensityField = !showDensityField;
+        std::cout << "Density field: " << (showDensityField ? "ON" : "OFF") << std::endl;
+        dKeyPressed = true;
+    }
+
+    if (glfwGetKey(window, GLFW_KEY_V) == GLFW_RELEASE)
     {
         vKeyPressed = false;
+    }
+    if (glfwGetKey(window, GLFW_KEY_P) == GLFW_RELEASE)
+    {
+        pKeyPressed = false;
+    }
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_RELEASE)
+    {
+        dKeyPressed = false;
     }
 }
 
@@ -384,6 +483,7 @@ int main()
         // Render the density field as a grid of quads
         int width = sim.getWidth();
         int height = sim.getHeight();
+
         std::vector<float> densityVertices;
 
         // Create a vertex for each density cell (with normalized coordinates)
@@ -396,10 +496,6 @@ int main()
                 float cellWidth = 2.0f / width;
                 float cellHeight = 2.0f / height;
                 float density = sim.getDensity(i, j);
-
-                // Skip cells with no density for efficiency
-                if (density < 0.01f)
-                    continue;
 
                 // Create a quad for this cell
                 // Triangle 1
@@ -430,8 +526,74 @@ int main()
             }
         }
 
+        // Render pressure field if enabled
+        if (showPressureField)
+        {
+            std::vector<float> pressureVertices;
+
+            // Create a vertex for each density cell (with normalized coordinates)
+            for (int i = 0; i < width; i++)
+            {
+                for (int j = 0; j < height; j++)
+                {
+                    float x = (float)i / width * 2.0f - 1.0f;
+                    float y = (float)j / height * 2.0f - 1.0f;
+                    float cellWidth = 2.0f / width;
+                    float cellHeight = 2.0f / height;
+                    float pressureNorm = sim.getNormalizedPressure(i, j);
+
+                    // Create a quad for this cell
+                    // Triangle 1
+                    pressureVertices.push_back(x);
+                    pressureVertices.push_back(y);
+                    pressureVertices.push_back(pressureNorm);
+
+                    pressureVertices.push_back(x + cellWidth);
+                    pressureVertices.push_back(y);
+                    pressureVertices.push_back(pressureNorm);
+
+                    pressureVertices.push_back(x);
+                    pressureVertices.push_back(y + cellHeight);
+                    pressureVertices.push_back(pressureNorm);
+
+                    // Triangle 2
+                    pressureVertices.push_back(x + cellWidth);
+                    pressureVertices.push_back(y);
+                    pressureVertices.push_back(pressureNorm);
+
+                    pressureVertices.push_back(x + cellWidth);
+                    pressureVertices.push_back(y + cellHeight);
+                    pressureVertices.push_back(pressureNorm);
+
+                    pressureVertices.push_back(x);
+                    pressureVertices.push_back(y + cellHeight);
+                    pressureVertices.push_back(pressureNorm);
+                }
+            }
+
+            // Render density field if we have any vertices
+            if (!pressureVertices.empty())
+            {
+                glBindVertexArray(pressureVAO);
+                glBindBuffer(GL_ARRAY_BUFFER, pressureVBO);
+                glBufferData(GL_ARRAY_BUFFER, pressureVertices.size() * sizeof(float), pressureVertices.data(), GL_DYNAMIC_DRAW);
+
+                // Position attribute
+                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+                glEnableVertexAttribArray(0);
+
+                // Pressure attribute
+                glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)(2 * sizeof(float)));
+                glEnableVertexAttribArray(1);
+
+                // Draw the pressure field
+                glUseProgram(pressureShaderProgram);
+                glDrawArrays(GL_TRIANGLES, 0, pressureVertices.size() / 3);
+            }
+        }
+
         // Render density field if we have any vertices
-        if (!densityVertices.empty())
+        if (showDensityField && !densityVertices.empty())
         {
             glBindVertexArray(densityVAO);
             glBindBuffer(GL_ARRAY_BUFFER, densityVBO);
@@ -470,7 +632,7 @@ int main()
                     float centerY = (float)j / height * 2.0f - 1.0f + (1.0f / height);
                     
                     // Scale the vector for visualization
-                    float scale = 0.05f; // Adjust this to make vectors longer/shorter
+                    float scale = 0.01f; // Adjust this to make vectors longer/shorter
                     float endX = centerX + normalizedVel.x * scale;
                     float endY = centerY + normalizedVel.y * scale;
                     
@@ -520,6 +682,10 @@ int main()
     glDeleteVertexArrays(1, &densityVAO);
     glDeleteBuffers(1, &densityVBO);
     glDeleteProgram(densityShaderProgram);
+
+    glDeleteVertexArrays(1, &pressureVAO);
+    glDeleteBuffers(1, &pressureVBO);
+    glDeleteProgram(pressureShaderProgram);
     
     glDeleteVertexArrays(1, &velocityVAO);
     glDeleteBuffers(1, &velocityVBO);
